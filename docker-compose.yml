@@ -1,0 +1,53 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: anticrawl-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    image: python:3.12-slim
+    container_name: anticrawl-backend
+    working_dir: /app/backend
+    volumes:
+      - ./:/app
+    environment:
+      LAB_MODE: "${LAB_MODE:-1}"
+      DATABASE_URL: "sqlite:///./anticrawl.db"
+      REDIS_URL: "redis://redis:6379/0"
+      RATE_LIMIT_QPS: "${RATE_LIMIT_QPS:-10}"
+      FP_RATE_LIMIT_QPS: "${FP_RATE_LIMIT_QPS:-30}"
+      BAN_SECONDS: "${BAN_SECONDS:-600}"
+      SIGN_SECRET: "${SIGN_SECRET:-change-me-in-lab}"
+      SIGN_WINDOW_SECONDS: "${SIGN_WINDOW_SECONDS:-120}"
+      NONCE_TTL_SECONDS: "${NONCE_TTL_SECONDS:-300}"
+      POW_DIFFICULTY: "${POW_DIFFICULTY:-4}"
+      DATA_RETENTION_DAYS: "${DATA_RETENTION_DAYS:-7}"
+    command: >
+      sh -c "pip install -q -r requirements.txt &&
+             python /app/scripts/make_font.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: node:22-alpine
+    container_name: anticrawl-frontend
+    working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+    environment:
+      VITE_BACKEND_URL: "http://backend:8000"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - backend
